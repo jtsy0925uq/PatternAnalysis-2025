@@ -7,6 +7,8 @@ from typing import Iterable
 import pandas as pd
 from sklearn.model_selection import GroupShuffleSplit
 
+from dataset import build_transforms, make_dataloader
+
 REQUIRED_COLUMNS: set[str] = {
     "image_name",
     "patient_id",
@@ -27,6 +29,11 @@ def parse_args() -> argparse.Namespace:
         "--split",
         action="store_true",
         help="Run data sanity checks and create patient-wise train/val splits.",
+    )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Load a single training batch to verify the data pipeline.",
     )
     parser.add_argument(
         "--data_root",
@@ -132,13 +139,54 @@ def run_split(data_root: Path, images_dir: Path, csv_path: Path) -> None:
     print(f"Saved validation split to {val_output_path}")
 
 
+def run_smoke(data_root: Path, images_dir: Path) -> None:
+    csv_path = data_root / "train_split.csv"
+    if not csv_path.is_file():
+        raise FileNotFoundError(
+            f"Expected split CSV at {csv_path}. Run --split before invoking --smoke."
+        )
+
+    train_tf, _ = build_transforms()
+    dataloader = make_dataloader(
+        csv_path=str(csv_path),
+        images_dir=str(images_dir),
+        transform=train_tf,
+        batch_size=8,
+        shuffle=False,
+    )
+
+    try:
+        images, targets, patient_ids, image_names = next(iter(dataloader))
+    except StopIteration as exc:
+        raise ValueError(f"No samples available in {csv_path}") from exc
+
+    positives = int((targets == 1).sum().item())
+    negatives = int((targets == 0).sum().item())
+
+    print(f"Smoke batch shape: {tuple(images.shape)}")
+    print(f"Smoke batch dtype: {images.dtype}")
+    print(f"Smoke batch range: min {images.min().item():.4f}, max {images.max().item():.4f}")
+    print(
+        "Smoke batch class balance: "
+        f"positives={positives}, negatives={negatives}, total={targets.numel()}"
+    )
+
+
 def main() -> None:
     args = parse_args()
 
+    action_taken = False
+
     if args.split:
         run_split(args.data_root, args.images_dir, args.csv_path)
-    else:
-        print("No action specified. Use --split to run the data sanity and split routine.")
+        action_taken = True
+
+    if args.smoke:
+        run_smoke(args.data_root, args.images_dir)
+        action_taken = True
+
+    if not action_taken:
+        print("No action specified. Use --split or --smoke to run a utility routine.")
 
 
 if __name__ == "__main__":
