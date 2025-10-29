@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# Envs & IDE
+.venv/
+env/
+venv/
+.vscode/
+.idea/
+
+# Data (do not commit datasets per brief)
+recognition/**/data/**
+!recognition/**/data/.gitkeep
+# If you keep tiny samples for docs, whitelist them:
+!recognition/**/data/train/sample_*.jpg
+!recognition/**/data/test/sample_*.jpg
+!recognition/**/data/train/sample_*.csv
+!recognition/**/data/test/sample_*.csv
+
+# Models & training artifacts (do not commit)
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.tflite
+*.npz
+*.npy
+checkpoints/
+outputs/
+logs/
+wandb/
+lightning_logs/
+
+# Figures you DO want to keep (for README) – create a subfolder and whitelist it
+recognition/**/figures/**
+!recognition/**/figures/README_keep.txt
