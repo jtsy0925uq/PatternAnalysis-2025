@@ -6,12 +6,18 @@ from typing import Iterable
 
 import pandas as pd
 import torch
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupShuffleSplit
 from torch.cuda.amp import GradScaler, autocast
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
 
 from dataset import ISICDataset, build_transforms, make_dataloader
-from module import SiameseBackbone, batch_hard_triplet_loss
+from module import (
+    SiameseBackbone,
+    batch_hard_triplet_loss,
+    build_prototypes,
+    score_by_prototypes,
+)
 
 REQUIRED_COLUMNS: set[str] = {
     "image_name",
@@ -299,6 +305,9 @@ def run_train(args: argparse.Namespace) -> None:
     val_dataset = ISICDataset(
         csv_path=str(csv_val), images_dir=str(args.images_dir), transform=val_tf
     )
+    train_proto_dataset = ISICDataset(
+        csv_path=str(csv_train), images_dir=str(args.images_dir), transform=val_tf
+    )
 
     train_targets = torch.as_tensor(
         train_dataset.df["target"].to_numpy(), dtype=torch.long
@@ -334,9 +343,43 @@ def run_train(args: argparse.Namespace) -> None:
     )
 
     model = SiameseBackbone(backbone=args.backbone, out_dim=512).to(device)
+    embed_dim = 512
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scaler = GradScaler(enabled=device.type == "cuda")
     amp_enabled = device.type == "cuda"
+
+    def embed_dataset(
+        dataset: ISICDataset, max_samples: int | None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if len(dataset) == 0:
+            return torch.empty((0, embed_dim)), torch.empty(0, dtype=torch.long)
+
+        count = len(dataset) if max_samples is None else min(max_samples, len(dataset))
+        indices = list(range(count))
+
+        loader = DataLoader(
+            Subset(dataset, indices),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            pin_memory=pin_memory,
+        )
+
+        collected_embs: list[torch.Tensor] = []
+        collected_targets: list[torch.Tensor] = []
+        with torch.no_grad():
+            for images, labels, _, _ in loader:
+                images = images.to(device, non_blocking=pin_memory)
+                embeddings = model(images)
+                collected_embs.append(embeddings.detach().cpu())
+                collected_targets.append(torch.as_tensor(labels).long())
+
+        if not collected_embs:
+            return torch.empty((0, embed_dim)), torch.empty(0, dtype=torch.long)
+
+        emb_tensor = torch.cat(collected_embs, dim=0)
+        target_tensor = torch.cat(collected_targets, dim=0)
+        return emb_tensor, target_tensor
 
     for epoch in range(args.epochs):
         model.train()
@@ -370,25 +413,63 @@ def run_train(args: argparse.Namespace) -> None:
         model.eval()
         val_loss_total = 0.0
         val_batches = 0
+        val_embeddings: list[torch.Tensor] = []
+        val_targets: list[torch.Tensor] = []
         with torch.no_grad():
             for images, targets, _, _ in val_loader:
                 images = images.to(device, non_blocking=pin_memory)
                 targets = targets.to(device)
                 with autocast(enabled=amp_enabled):
                     embeddings = model(images)
-                    try:
-                        loss = batch_hard_triplet_loss(
-                            embeddings, targets, margin=args.margin
-                        )
-                    except ValueError:
+                val_embeddings.append(embeddings.detach().cpu())
+                val_targets.append(targets.detach().cpu())
+                try:
+                    loss = batch_hard_triplet_loss(
+                        embeddings, targets, margin=args.margin
+                    )
+                except ValueError:
                         continue
                 val_loss_total += loss.item()
                 val_batches += 1
 
         val_loss = val_loss_total / val_batches if val_batches else float("nan")
+
+        metrics_msg = ""
+        if val_embeddings:
+            val_embs_tensor = torch.cat(val_embeddings, dim=0)
+            val_targets_tensor = torch.cat(val_targets, dim=0).long()
+
+            proto_embs, proto_targets = embed_dataset(train_proto_dataset, 1000)
+            if (
+                proto_targets.unique().numel() < 2
+                and len(proto_targets) < len(train_proto_dataset)
+            ):
+                proto_embs, proto_targets = embed_dataset(train_proto_dataset, None)
+
+            try:
+                proto0, proto1 = build_prototypes(proto_embs, proto_targets)
+                val_probs = score_by_prototypes(val_embs_tensor, proto0, proto1)
+                val_probs_np = val_probs.detach().numpy()
+                val_preds = (val_probs >= 0.5).to(torch.long)
+                val_acc = (val_preds == val_targets_tensor).float().mean().item()
+
+                if val_targets_tensor.unique().numel() >= 2:
+                    val_auc = roc_auc_score(
+                        val_targets_tensor.numpy(), val_probs_np
+                    )
+                else:
+                    val_auc = float("nan")
+
+                metrics_msg = f" | val_acc={val_acc:.4f} | val_auc={val_auc:.4f}"
+            except ValueError as exc:
+                metrics_msg = f" | val metrics skipped: {exc}"
+        else:
+            metrics_msg = " | val metrics skipped: no validation samples"
+
         print(
             f"Epoch {epoch + 1}/{args.epochs} | "
             f"train_loss={train_loss:.4f} | val_loss={val_loss:.4f}"
+            f"{metrics_msg}"
         )
 
     save_dir = args.save_dir
