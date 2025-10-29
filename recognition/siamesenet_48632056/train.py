@@ -4,6 +4,9 @@ import argparse
 from pathlib import Path
 from typing import Iterable
 
+import math
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 from sklearn.metrics import roc_auc_score
@@ -149,6 +152,20 @@ def print_sanity_stats(df: pd.DataFrame, images_dir: Path) -> None:
             f"Found {len(missing_images)} missing images under {images_dir}. "
             f"Sample: {sample}"
         )
+
+
+def compute_metrics(
+    targets: torch.Tensor, probs: torch.Tensor
+) -> tuple[float, float]:
+    """Compute accuracy and ROC AUC; skip AUC if only one class present."""
+    preds = (probs >= 0.5).to(torch.long)
+    acc = (preds == targets).float().mean().item()
+    unique = targets.unique()
+    if unique.numel() < 2:
+        print("Validation AUC skipped: only one class present.")
+        return acc, float("nan")
+    auc = roc_auc_score(targets.cpu().numpy(), probs.cpu().numpy())
+    return acc, auc
 
 
 def find_missing_images(df: pd.DataFrame, images_dir: Path) -> list[str]:
@@ -381,6 +398,15 @@ def run_train(args: argparse.Namespace) -> None:
         target_tensor = torch.cat(collected_targets, dim=0)
         return emb_tensor, target_tensor
 
+    save_dir = args.save_dir
+    save_dir.mkdir(parents=True, exist_ok=True)
+    best_path = save_dir / "best.pt"
+    train_history: list[float] = []
+    val_acc_history: list[float] = []
+    val_auc_history: list[float] = []
+    best_auc = -math.inf
+    best_epoch = 0
+
     for epoch in range(args.epochs):
         model.train()
         running_loss = 0.0
@@ -409,12 +435,15 @@ def run_train(args: argparse.Namespace) -> None:
             train_batches += 1
 
         train_loss = running_loss / train_batches if train_batches else float("nan")
+        train_history.append(train_loss)
 
         model.eval()
         val_loss_total = 0.0
         val_batches = 0
         val_embeddings: list[torch.Tensor] = []
         val_targets: list[torch.Tensor] = []
+        val_acc = float("nan")
+        val_auc = float("nan")
         with torch.no_grad():
             for images, targets, _, _ in val_loader:
                 images = images.to(device, non_blocking=pin_memory)
@@ -428,12 +457,11 @@ def run_train(args: argparse.Namespace) -> None:
                         embeddings, targets, margin=args.margin
                     )
                 except ValueError:
-                        continue
+                    continue
                 val_loss_total += loss.item()
                 val_batches += 1
 
         val_loss = val_loss_total / val_batches if val_batches else float("nan")
-
         metrics_msg = ""
         if val_embeddings:
             val_embs_tensor = torch.cat(val_embeddings, dim=0)
@@ -449,22 +477,15 @@ def run_train(args: argparse.Namespace) -> None:
             try:
                 proto0, proto1 = build_prototypes(proto_embs, proto_targets)
                 val_probs = score_by_prototypes(val_embs_tensor, proto0, proto1)
-                val_probs_np = val_probs.detach().numpy()
-                val_preds = (val_probs >= 0.5).to(torch.long)
-                val_acc = (val_preds == val_targets_tensor).float().mean().item()
-
-                if val_targets_tensor.unique().numel() >= 2:
-                    val_auc = roc_auc_score(
-                        val_targets_tensor.numpy(), val_probs_np
-                    )
-                else:
-                    val_auc = float("nan")
-
+                val_acc, val_auc = compute_metrics(val_targets_tensor, val_probs)
                 metrics_msg = f" | val_acc={val_acc:.4f} | val_auc={val_auc:.4f}"
             except ValueError as exc:
                 metrics_msg = f" | val metrics skipped: {exc}"
         else:
             metrics_msg = " | val metrics skipped: no validation samples"
+
+        val_acc_history.append(val_acc)
+        val_auc_history.append(val_auc)
 
         print(
             f"Epoch {epoch + 1}/{args.epochs} | "
@@ -472,8 +493,20 @@ def run_train(args: argparse.Namespace) -> None:
             f"{metrics_msg}"
         )
 
-    save_dir = args.save_dir
-    save_dir.mkdir(parents=True, exist_ok=True)
+        if not math.isnan(val_auc) and val_auc > best_auc:
+            best_auc = val_auc
+            best_epoch = epoch + 1
+            torch.save(
+                {
+                    "epoch": best_epoch,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "config": vars(args),
+                    "best_auc": best_auc,
+                },
+                best_path,
+            )
+
     checkpoint_path = save_dir / "model_last.pt"
     torch.save(
         {
@@ -485,6 +518,38 @@ def run_train(args: argparse.Namespace) -> None:
         checkpoint_path,
     )
     print(f"Saved checkpoint to {checkpoint_path}")
+
+    figures_dir = Path("figures")
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    epochs_axis = list(range(1, len(train_history) + 1))
+
+    plt.figure()
+    plt.plot(epochs_axis, train_history, label="Train Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.grid(True, alpha=0.2)
+    plt.tight_layout()
+    plt.savefig(figures_dir / "loss_curve.png", dpi=150)
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs_axis, val_acc_history, label="Accuracy")
+    plt.plot(epochs_axis, val_auc_history, label="AUC")
+    plt.xlabel("Epoch")
+    plt.ylabel("Metric")
+    plt.legend()
+    plt.grid(True, alpha=0.2)
+    plt.tight_layout()
+    plt.savefig(figures_dir / "val_metrics.png", dpi=150)
+    plt.close()
+
+    if best_epoch:
+        print(
+            f"Best validation AUC {best_auc:.4f} achieved at epoch {best_epoch}. "
+            f"Saved to {best_path}"
+        )
+    else:
+        print("Best validation AUC not available; no valid validation metrics computed.")
 
 
 def main() -> None:
