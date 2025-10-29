@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Tuple
-
 import timm
 import torch
 import torch.nn as nn
@@ -38,10 +36,10 @@ class SiameseBackbone(nn.Module):
         if not 0.0 <= p_drop < 1.0:
             raise ValueError("p_drop must be in [0, 1).")
 
-        self.encoder = timm.create_model(
+        self.enc = timm.create_model(
             backbone, pretrained=True, num_classes=0, global_pool="avg"
         )
-        in_features = getattr(self.encoder, "num_features", None)
+        in_features = getattr(self.enc, "num_features", None)
         if in_features is None:
             raise AttributeError("Encoder returned by timm must expose num_features.")
 
@@ -55,16 +53,16 @@ class SiameseBackbone(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim != 4:
             raise ValueError("Input to SiameseBackbone must be 4D [B, C, H, W].")
-        features = self.encoder(x)
+        features = self.enc(x)
         embeddings = self.head(features)
         return F.normalize(embeddings, p=2, dim=-1)
 
     def freeze_encoder(self) -> None:
-        for param in self.encoder.parameters():
+        for param in self.enc.parameters():
             param.requires_grad = False
 
     def unfreeze_encoder(self) -> None:
-        for param in self.encoder.parameters():
+        for param in self.enc.parameters():
             param.requires_grad = True
 
 
@@ -113,7 +111,7 @@ def batch_hard_triplet_loss(
 
 
 @torch.no_grad()
-def build_prototypes(embs: torch.Tensor, ys: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def build_prototypes(embs: torch.Tensor, ys: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if embs.ndim != 2:
         raise ValueError("embs must be 2D tensor [N, D].")
     if ys.ndim != 1:

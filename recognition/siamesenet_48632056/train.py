@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
+import torch
 from sklearn.model_selection import GroupShuffleSplit
 
 from dataset import build_transforms, make_dataloader
+from module import SiameseBackbone, batch_hard_triplet_loss
 
 REQUIRED_COLUMNS: set[str] = {
     "image_name",
@@ -34,6 +36,11 @@ def parse_args() -> argparse.Namespace:
         "--smoke",
         action="store_true",
         help="Load a single training batch to verify the data pipeline.",
+    )
+    parser.add_argument(
+        "--model_smoke",
+        action="store_true",
+        help="Run a forward pass through the Siamese backbone and report diagnostics.",
     )
     parser.add_argument(
         "--data_root",
@@ -172,6 +179,54 @@ def run_smoke(data_root: Path, images_dir: Path) -> None:
     )
 
 
+def run_model_smoke(data_root: Path, images_dir: Path) -> None:
+    """
+    Forward one batch through the Siamese backbone to validate the model stack.
+    """
+    csv_path = data_root / "train_split.csv"
+    if not csv_path.is_file():
+        raise FileNotFoundError(
+            f"Expected split CSV at {csv_path}. Run --split before invoking --model_smoke."
+        )
+
+    _, val_tf = build_transforms()
+    dataloader = make_dataloader(
+        csv_path=str(csv_path),
+        images_dir=str(images_dir),
+        transform=val_tf,
+        batch_size=8,
+        shuffle=False,
+    )
+
+    try:
+        images, targets, _, _ = next(iter(dataloader))
+    except StopIteration as exc:
+        raise ValueError(f"No samples available in {csv_path}") from exc
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = SiameseBackbone().to(device)
+    model.eval()
+
+    images = images.to(device)
+    targets = targets.to(device)
+
+    with torch.no_grad():
+        embeddings = model(images)
+
+    norms = embeddings.norm(p=2, dim=-1)
+    print(f"Model smoke embeddings shape: {tuple(embeddings.shape)}")
+    print(
+        "Model smoke embedding L2 norms: "
+        f"mean={norms.mean().item():.4f}, std={norms.std(unbiased=False).item():.4f}"
+    )
+
+    if targets.unique().numel() >= 2:
+        loss = batch_hard_triplet_loss(embeddings, targets)
+        print(f"Model smoke triplet loss: {loss.item():.4f}")
+    else:
+        print("Model smoke triplet loss skipped: batch lacks both classes.")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -185,8 +240,12 @@ def main() -> None:
         run_smoke(args.data_root, args.images_dir)
         action_taken = True
 
+    if args.model_smoke:
+        run_model_smoke(args.data_root, args.images_dir)
+        action_taken = True
+
     if not action_taken:
-        print("No action specified. Use --split or --smoke to run a utility routine.")
+        print("No action specified. Use --split, --smoke, or --model_smoke to run a utility routine.")
 
 
 if __name__ == "__main__":
