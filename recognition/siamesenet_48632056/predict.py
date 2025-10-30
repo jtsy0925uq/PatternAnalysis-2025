@@ -67,7 +67,8 @@ def load_checkpoint(backbone: str, checkpoint_path: Path, device: torch.device) 
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Explicitly disable weights_only safeguard to load checkpoints containing pathlib objects.
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state_dict = checkpoint.get("model_state") if isinstance(checkpoint, dict) else checkpoint
     if state_dict is None:
         raise KeyError("Checkpoint does not contain 'model_state'.")
