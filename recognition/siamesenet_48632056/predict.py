@@ -10,6 +10,8 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
+from sklearn.metrics import accuracy_score, roc_auc_score
+
 from dataset import ISICDataset, build_transforms
 from module import SiameseBackbone, build_prototypes, score_by_prototypes
 
@@ -80,7 +82,7 @@ def load_checkpoint(backbone: str, checkpoint_path: Path, device: torch.device) 
 @torch.no_grad()
 def compute_prototypes(
     model: SiameseBackbone,
-    transform,
+    transform: object,
     data_root: Path,
     batch_size: int,
     device: torch.device,
@@ -137,31 +139,38 @@ def run_inference(
     proto1: torch.Tensor,
     csv_path: Path,
     images_dir: Path,
-    transform,
+    transform: object,
     batch_size: int,
     device: torch.device,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, Optional[np.ndarray]]:
     dataset = ISICDataset(csv_path=csv_path, images_dir=images_dir, transform=transform)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
     image_names: list[str] = []
     probabilities: list[float] = []
+    targets: list[int] = []
+
+    has_targets = "target" in dataset.df.columns
 
     for batch in tqdm(loader, desc="Predicting"):
-        images, _, _, names = batch
+        images, targets_tensor, _, names = batch
         images = images.to(device)
         embeddings = model(images)
         probs = score_by_prototypes(embeddings, proto0, proto1).cpu().numpy()
 
         image_names.extend(names)
         probabilities.extend(probs.tolist())
+        if has_targets:
+            targets.extend(targets_tensor.cpu().numpy().tolist())
 
-    return pd.DataFrame(
+    pred_df = pd.DataFrame(
         {
             "image_name": image_names,
             "probability_melanoma": np.array(probabilities, dtype=np.float32),
         }
     )
+    target_array = np.array(targets, dtype=np.int64) if has_targets and targets else None
+    return pred_df, target_array
 
 
 def main() -> None:
@@ -174,13 +183,15 @@ def main() -> None:
 
     model = load_checkpoint(args.backbone, args.checkpoint, device)
 
+    # Build class prototypes from the training split for nearest-prototype scoring.
     prototypes = compute_prototypes(model, val_transform, args.data_root, args.batch_size, device)
     if prototypes is None:
         print("Prototypes unavailable; aborting inference.")
         return
     proto0, proto1 = prototypes
 
-    predictions = run_inference(
+    # Run inference and capture optional ground-truth labels for evaluation.
+    predictions, targets = run_inference(
         model=model,
         proto0=proto0,
         proto1=proto1,
@@ -197,6 +208,18 @@ def main() -> None:
     predictions = predictions[["image_name", "probability_melanoma"]]
     predictions.to_csv(output_path, index=False, float_format="%.4f")
     print(f"Wrote predictions for {len(predictions)} images to {output_path}.")
+
+    if targets is not None and targets.size:
+        probs = predictions["probability_melanoma"].to_numpy()
+        preds_binary = (probs >= 0.5).astype(int)
+        accuracy = accuracy_score(targets, preds_binary)
+        try:
+            auc = roc_auc_score(targets, probs)
+            print(f"Accuracy: {accuracy:.4f} | ROC AUC: {auc:.4f}")
+        except ValueError as exc:
+            print(f"Accuracy: {accuracy:.4f} | ROC AUC skipped: {exc}")
+    else:
+        print("No ground-truth labels, skipping metrics.")
 
 
 if __name__ == "__main__":
