@@ -17,7 +17,7 @@ from sklearn.metrics import auc as sklearn_auc
 from dataset import ISICDataset, build_transforms
 from module import SiameseBackbone, build_prototypes, score_by_prototypes
 
-
+#arguments
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inference and evaluation for Siamese network.")
     parser.add_argument(
@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
+#loads the checkpoint saved under checkpoints/best.pt
 def load_checkpoint(backbone: str, checkpoint_path: Path, device: torch.device) -> SiameseBackbone:
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")

@@ -17,6 +17,7 @@ def cosine_dist(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """
     if a.ndim != 2 or b.ndim != 2:
         raise ValueError("cosine_dist expects 2D tensors [N, D] and [M, D].")
+    # Normalize rows before computing cosine similarity.
     a_norm = F.normalize(a, p=2, dim=-1)
     b_norm = F.normalize(b, p=2, dim=-1)
     similarity = a_norm @ b_norm.t()
@@ -36,6 +37,7 @@ class SiameseBackbone(nn.Module):
         if not 0.0 <= p_drop < 1.0:
             raise ValueError("p_drop must be in [0, 1).")
 
+        # Pull a pretrained encoder without classification head.
         self.enc = timm.create_model(
             backbone, pretrained=True, num_classes=0, global_pool="avg"
         )
@@ -43,6 +45,7 @@ class SiameseBackbone(nn.Module):
         if in_features is None:
             raise AttributeError("Encoder returned by timm must expose num_features.")
 
+        # Small mlp head to project features into embedding space.
         self.head = nn.Sequential(
             nn.Linear(in_features, in_features),
             nn.ReLU(inplace=True),
@@ -55,6 +58,7 @@ class SiameseBackbone(nn.Module):
             raise ValueError("Input to SiameseBackbone must be 4D [B, C, H, W].")
         features = self.enc(x)
         embeddings = self.head(features)
+        # Keep embeddings on the unit sphere for cosine metrics.
         return F.normalize(embeddings, p=2, dim=-1)
 
     def freeze_encoder(self) -> None:
@@ -98,6 +102,7 @@ def batch_hard_triplet_loss(
         if not mask_negative.any():
             raise ValueError("Each anchor must have at least one negative sample.")
 
+        # Hard mining picks farthest positive and closest negative.
         hardest_positive = dist_matrix[anchor_idx][mask_positive].max()
         hardest_negative = dist_matrix[anchor_idx][mask_negative].min()
 
@@ -124,6 +129,7 @@ def build_prototypes(embs: torch.Tensor, ys: torch.Tensor) -> tuple[torch.Tensor
     if not mask_normal.any() or not mask_melanoma.any():
         raise ValueError("Both classes (0 and 1) must be present to build prototypes.")
 
+    # Average class embeddings then normalize for cosine use.
     proto0 = F.normalize(embs[mask_normal].mean(dim=0, keepdim=True), p=2, dim=-1)
     proto1 = F.normalize(embs[mask_melanoma].mean(dim=0, keepdim=True), p=2, dim=-1)
     return proto0, proto1
@@ -143,5 +149,6 @@ def score_by_prototypes(
     cos_normal = (embs_norm @ proto0_norm.t()).squeeze(-1)
     cos_melanoma = (embs_norm @ proto1_norm.t()).squeeze(-1)
 
+    # Logit is positive when closer to melanoma prototype.
     logits = cos_melanoma - cos_normal
     return torch.sigmoid(logits)

@@ -30,6 +30,7 @@ def build_transforms() -> Tuple[A.Compose, A.Compose]:
 
     train_tf = A.Compose(
         [
+            # Basic flips and rotations to cover view changes.
             A.HorizontalFlip(p=0.5),
             A.RandomRotate90(p=0.2),
             A.Normalize(mean=mean, std=std),
@@ -72,6 +73,7 @@ class ISICDataset(Dataset):
     def __getitem__(self, index: int) -> tuple[torch.Tensor, int, str, str]:
         row = self.df.iloc[index]
 
+        # Accept bare stems or filenames with suffix.
         image_name = str(row["image_name"])
         image_path = self._resolve_image_path(image_name)
         if not image_path.is_file():
@@ -82,6 +84,7 @@ class ISICDataset(Dataset):
             raise FileNotFoundError(f"Failed to load image at {image_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+        # Albumentations expects dict input, returns tensor.
         transformed = self.transform(image=image)
         image_tensor = transformed["image"]
 
