@@ -194,7 +194,8 @@ def main() -> None:
     output_path = args.output_csv
     if output_path.parent and not output_path.parent.exists():
         output_path.parent.mkdir(parents=True, exist_ok=True)
-    predictions.sort_values("image_name").to_csv(output_path, index=False)
+    predictions = predictions[["image_name", "probability_melanoma"]]
+    predictions.to_csv(output_path, index=False, float_format="%.4f")
     print(f"Wrote predictions for {len(predictions)} images to {output_path}.")
 
 
