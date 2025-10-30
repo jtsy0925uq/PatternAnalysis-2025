@@ -4,9 +4,9 @@ ISIC 2020 Melanoma Classification using Siamese Network
 Project Overview
 ------------------
 This project implements a Siamese Neural Network to classify melanoma vs normal skin lesions from the ISIC 2020 Kaggle Challenge dataset.
-The model learns to map lesion images into a shared embedding space, where visually similar lesions (same diagnosis) lie close together. The goal is to achieve approximately 0.8 accuracy on unseen test data — a challenging, real-world binary classification task in medical imaging.
+The model learns to map lesion images into a shared embedding space, where visually similar lesions (same diagnosis) lie close together. The goal is to achieve approximately 0.8 accuracy on unseen test data. This a challenging, real-world binary classification task in medical imaging.
 
-How the Algorithm Works
+The Algorithm
 ------------------------
 A Siamese network consists of two identical convolutional branches that share weights. Each branch encodes an image into a 512-dimensional embedding vector using a pretrained EfficientNet-B0 backbone.
 The model is trained using batch-hard triplet loss, which encourages embeddings of the same class (benign/malignant) to be close together while pushing apart embeddings of different classes.
@@ -22,18 +22,17 @@ Triplet Loss → learns to minimize distance for same-class pairs
 
 Data Preprocessing
 ------------------
+* Input images were resized to 384×384.
 
-....* Input images were resized to 384×384.
+* Missing metadata values were handled via omission or categorical fallback.
 
-....* Missing metadata values were handled via omission or categorical fallback.
+* Patient-wise GroupShuffleSplit (80/20) ensured that images from the same patient never appeared in both train and validation sets (preventing data leakage).
 
-....* Patient-wise GroupShuffleSplit (80/20) ensured that images from the same patient never appeared in both train and validation sets (preventing data leakage).
+* Training was balanced using a WeightedRandomSampler to handle class imbalance (melanoma ≈ 2%).
 
-....* Training was balanced using a WeightedRandomSampler to handle class imbalance (melanoma ≈ 2%).
+* Validation used deterministic transforms (no augmentation).
 
-....* Validation used deterministic transforms (no augmentation).
-
-....* No resizing or normalization differences between train and test.
+* No resizing or normalization differences between train and test.
 
 Dependencies
 -------------

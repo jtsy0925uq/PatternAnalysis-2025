@@ -103,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backbone",
         type=str,
-        default="tf_efficientnet_b0.ns_jft_in1k",
+        default="tf_efficientnet_b0_ns",
         help="Backbone name for the Siamese encoder.",
     )
     parser.add_argument(
@@ -434,7 +434,7 @@ def run_train(args: argparse.Namespace) -> None:
             running_loss += loss.item()
             train_batches += 1
 
-        train_loss = running_loss / train_batches if train_batches else float("nan")
+        train_loss = running_loss / train_batches if train_batches > 0 else 0.0
         train_history.append(train_loss)
 
         model.eval()
@@ -461,7 +461,7 @@ def run_train(args: argparse.Namespace) -> None:
                 val_loss_total += loss.item()
                 val_batches += 1
 
-        val_loss = val_loss_total / val_batches if val_batches else float("nan")
+        val_loss = val_loss_total / val_batches if val_batches > 0 else 0.0
         metrics_msg = ""
         if val_embeddings:
             val_embs_tensor = torch.cat(val_embeddings, dim=0)

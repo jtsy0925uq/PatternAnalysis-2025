@@ -4,13 +4,15 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score, roc_curve, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import auc as sklearn_auc
 
 from dataset import ISICDataset, build_transforms
 from module import SiameseBackbone, build_prototypes, score_by_prototypes
@@ -221,6 +223,65 @@ def main() -> None:
             print(f"Accuracy: {accuracy:.4f} | ROC AUC skipped: {exc}")
     else:
         print("No ground-truth labels, skipping metrics.")
+
+    # Generate evaluation figures for documentation.
+    fig_dir = Path("figures")
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    probs = predictions["probability_melanoma"].to_numpy()
+
+    if targets is not None and targets.size:
+        try:
+            fpr, tpr, _ = roc_curve(targets, probs)
+            roc_auc = sklearn_auc(fpr, tpr)
+            plt.figure()
+            plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.3f}")
+            plt.plot([0, 1], [0, 1], "k--", lw=1)
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.title("ROC Curve - ISIC 2020 Siamese Model")
+            plt.legend(loc="lower right")
+            plt.tight_layout()
+            plt.savefig(fig_dir / "roc_curve.png", dpi=150)
+            plt.close()
+        except ValueError as exc:
+            print(f"Skipping ROC curve: {exc}")
+
+        cm = confusion_matrix(targets, (probs >= 0.5).astype(int))
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Normal", "Melanoma"])
+        disp.plot(cmap="Blues", values_format="d")
+        plt.title("Confusion Matrix - ISIC 2020 Siamese Model")
+        plt.tight_layout()
+        plt.savefig(fig_dir / "confusion_matrix.png", dpi=150)
+        plt.close()
+    else:
+        print("Skipping ROC curve and confusion matrix: no ground-truth targets.")
+
+    if len(predictions):
+        sample_indices = np.random.choice(len(predictions), size=min(9, len(predictions)), replace=False)
+        plt.figure(figsize=(8, 8))
+        plotted = False
+        for position, idx in enumerate(sample_indices, 1):
+            img_name = predictions.iloc[idx]["image_name"]
+            img_path = Path(args.images_dir) / f"{img_name}.jpg"
+            if not img_path.is_file():
+                print(f"Missing image for prediction grid: {img_path}")
+                continue
+            img = plt.imread(img_path)
+            plt.subplot(3, 3, position)
+            plt.imshow(img)
+            plt.axis("off")
+            plt.title(f"p(melanoma)={predictions.iloc[idx]['probability_melanoma']:.2f}")
+            plotted = True
+        if plotted:
+            plt.tight_layout()
+            plt.savefig(fig_dir / "pred_examples.png", dpi=150)
+            plt.close()
+        else:
+            plt.close()
+            print("Skipping prediction grid: sampled images not found on disk.")
+    else:
+        print("Skipping prediction grid: no predictions available.")
 
 
 if __name__ == "__main__":
