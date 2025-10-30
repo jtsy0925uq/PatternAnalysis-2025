@@ -6,13 +6,13 @@ Project Overview
 This project implements a Siamese Neural Network to classify melanoma vs normal skin lesions from the ISIC 2020 Kaggle Challenge dataset.
 The model learns to map lesion images into a shared embedding space, where visually similar lesions (same diagnosis) lie close together. The goal is to achieve approximately 0.8 accuracy on unseen test data — a challenging, real-world binary classification task in medical imaging.
 
-##How the Algorithm Works
-
+How the Algorithm Works
+------------------------
 A Siamese network consists of two identical convolutional branches that share weights. Each branch encodes an image into a 512-dimensional embedding vector using a pretrained EfficientNet-B0 backbone.
 The model is trained using batch-hard triplet loss, which encourages embeddings of the same class (benign/malignant) to be close together while pushing apart embeddings of different classes.
 After training, we compute class prototypes (average embeddings per class). During inference, each new image is embedded and classified based on its cosine similarity to the class prototypes.
 
-##The final architecture can be visualised as:
+The final architecture can be visualised as:
 ```python
 Image A ──┐
            │ Siamese Encoder (EfficientNet + MLP → 512D normalized embedding)
@@ -20,7 +20,8 @@ Image B ──┘
 Triplet Loss → learns to minimize distance for same-class pairs
 ```
 
-##Data Preprocessing
+Data Preprocessing
+------------------
 
 ....* Input images were resized to 384×384.
 
@@ -34,7 +35,8 @@ Triplet Loss → learns to minimize distance for same-class pairs
 
 ....* No resizing or normalization differences between train and test.
 
-##Dependencies
+Dependencies
+-------------
 | Library        | Version |
 | -------------- | ------- |
 | Python         | 3.12.6  |
@@ -47,23 +49,24 @@ Triplet Loss → learns to minimize distance for same-class pairs
 | matplotlib     | 3.9.2   |
 | opencv-python  | 4.10.0  |
 
-##How To Use
-###1. Split and verify data
+How To Use
+-------------
+### 1. Split and verify data
 ```python
 python train.py --split --data_root data/train --images_dir data/train/train-img
 ```
 
-###2. Smoke Test
+### 2. Smoke Test
 ```python
 python train.py --model_smoke --data_root data/train --images_dir data/train/train-img
 ```
 
-###3. Train
+### 3. Train
 ```python
 python train.py --train_run --data_root data/train --images_dir data/train/train-img --epochs 10 --batch_size 16 --lr 0.0003 --backbone "tf_efficientnet_b0.ns_jft_in1k"
 ```
 
-###4. Predict
+### 4. Predict
 ```python
 python predict.py --data_root data/train --images_dir data/train/train-img --csv_path data/train/val_split.csv --checkpoint checkpoints/best.pt
 ```
