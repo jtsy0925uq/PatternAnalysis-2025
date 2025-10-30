@@ -1,7 +1,8 @@
-#ISIC 2020 Melanoma Classification using Siamese Network
+ISIC 2020 Melanoma Classification using Siamese Network
+========================================================
 
-##Project Overview
-================
+Project Overview
+------------------
 This project implements a Siamese Neural Network to classify melanoma vs normal skin lesions from the ISIC 2020 Kaggle Challenge dataset.
 The model learns to map lesion images into a shared embedding space, where visually similar lesions (same diagnosis) lie close together. The goal is to achieve approximately 0.8 accuracy on unseen test data — a challenging, real-world binary classification task in medical imaging.
 
