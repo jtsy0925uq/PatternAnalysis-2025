@@ -103,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backbone",
         type=str,
-        default="tf_efficientnet_b0_ns",
+        default="tf_efficientnet_b0.ns_jft_in1k",
         help="Backbone name for the Siamese encoder.",
     )
     parser.add_argument(
