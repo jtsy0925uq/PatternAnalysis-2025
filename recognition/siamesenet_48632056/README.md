@@ -114,6 +114,13 @@ Epoch 2/2 | train_loss=0.1358 | val_loss=0.1901 | val_acc=0.8042 | val_auc=0.766
 ```
 The model achieved approximately 0.80 accuracy and 0.77 ROC AUC on the held-out validation set, meeting the project’s target performance.
 
+When running the final inference step (predict.py) on the held-out validation set:
+```python
+Wrote predictions for 6965 images to predictions.csv.
+Accuracy: 0.7911 | ROC AUC: 0.7797
+```
+This confirms the Siamese network generalised well and reproduced the expected accuracy (~0.8) and AUC (~0.78).
+
 ### Training Loss Curve
 ![Training Loss Curve](figures/loss_curve.png)
 Training loss steadily decreased from 0.186 → 0.136 across two epochs, showing stable convergence even with limited iterations. The smooth decline indicates that the Siamese encoder effectively learned discriminative features within the embedding space.
